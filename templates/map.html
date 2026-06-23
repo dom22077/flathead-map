@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<meta name="theme-color" content="#16213e" />
+<title>Flathead Valley Parcels</title>
+<link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}" />
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icon.png') }}" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; flex-direction: column; height: 100vh; background: #1a1a2e; color: #eee; }
+#header { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: #16213e; border-bottom: 1px solid #0f3460; flex-shrink: 0; flex-wrap: wrap; }
+#header h1 { font-size: 14px; font-weight: 600; white-space: nowrap; color: #e2b96f; }
+#search-box { flex: 1; min-width: 150px; max-width: 380px; padding: 7px 10px; border-radius: 6px; border: 1px solid #0f3460; background: #0f3460; color: #eee; font-size: 15px; outline: none; }
+#search-box:focus { border-color: #e2b96f; }
+#result-count { font-size: 12px; color: #aaa; white-space: nowrap; }
+.hbtn { padding: 6px 11px; border: none; border-radius: 6px; background: #0f3460; color: #ccc; cursor: pointer; font-size: 13px; text-decoration: none; display: inline-block; }
+.hbtn:hover { background: #e2b96f; color: #1a1a2e; }
+#locate-btn { background: #2e7d32; color: #fff; font-weight: 700; }
+#locate-btn:hover { background: #43a047; }
+#map { flex: 1; width: 100%; }
+#status { position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%); background: rgba(22,33,62,0.92); color: #e2b96f; padding: 8px 18px; border-radius: 20px; font-size: 13px; pointer-events: none; z-index: 900; display: none; }
+.leaflet-popup-content-wrapper { border-radius: 8px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); max-height: 70vh; overflow-y: auto; }
+.leaflet-popup-content { margin: 10px 14px; font-size: 13px; line-height: 1.6; min-width: 240px; max-width: 320px; }
+.popup-title { font-size: 14px; font-weight: 700; margin-bottom: 8px; color: #1a1a2e; border-bottom: 2px solid #e2b96f; padding-bottom: 4px; }
+.popup-row { display: flex; gap: 6px; margin-bottom: 3px; }
+.popup-label { font-weight: 600; color: #555; min-width: 90px; flex-shrink: 0; }
+.popup-value { color: #222; word-break: break-word; }
+.popup-phone { margin-top: 8px; padding: 6px 10px; background: #e8f5e9; border-left: 3px solid #2e7d32; border-radius: 4px; }
+.popup-phone .popup-label { color: #2e7d32; }
+.popup-phone .popup-value { color: #1b5e20; font-weight: 700; font-size: 15px; }
+.popup-phone a { color: #1b5e20; text-decoration: none; }
+.me-dot { width: 18px; height: 18px; background: #2196f3; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 3px rgba(33,150,243,0.4); }
+.popup-actions { display: flex; gap: 8px; margin-top: 10px; }
+.popup-actions button { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; font-size: 16px; font-weight: 700; transition: all 0.15s; }
+.popup-actions .btn-check:hover, .popup-actions .btn-check.active { background: #2e7d32; color: #fff; border-color: #2e7d32; }
+.popup-actions .btn-x:hover, .popup-actions .btn-x.active { background: #c62828; color: #fff; border-color: #c62828; }
+.popup-notes { width: 100%; margin-top: 8px; padding: 6px 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; font-family: inherit; resize: vertical; min-height: 48px; }
+.popup-notes-saved { font-size: 11px; color: #2e7d32; margin-top: 2px; height: 14px; }
+.parcel-badge { background: transparent; border: none; }
+.parcel-badge-inner { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: 900; color: #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.5); border: 2px solid #fff; }
+.badge-check { background: #2e7d32; }
+.badge-x { background: #c62828; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1>Valley Parcels</h1>
+  <input id="search-box" type="search" placeholder="Search owner or address..." autocomplete="off" />
+  <span id="result-count"></span>
+  <button id="locate-btn" class="hbtn">📍 Find me</button>
+  <button id="stats-btn" class="hbtn">Stats</button>
+  {% if is_admin %}<a class="hbtn" href="/admin">Clients</a>{% endif %}
+  <a class="hbtn" href="/logout">Log out</a>
+</div>
+<div id="map"></div>
+<div id="status"></div>
+<script>
+const SOURCES = ['/data/parcels.geojson'];
+const CENTER = [48.1958, -114.3120]; // Kalispell
+const DEFAULT_ZOOM = 14;
+
+const STYLE_DEFAULT  = { color: '#e2b96f', weight: 1, opacity: 0.85, fillColor: '#e2b96f', fillOpacity: 0.15 };
+const STYLE_HOVER    = { color: '#fff',    weight: 2, opacity: 1,   fillColor: '#fff',    fillOpacity: 0.30 };
+const STYLE_SELECTED = { color: '#f44336', weight: 2.5, opacity: 1, fillColor: '#f44336', fillOpacity: 0.40 };
+const STYLE_DIM      = { color: '#555',    weight: 0.5, opacity: 0.4, fillColor: '#555', fillOpacity: 0.06 };
+const STYLE_CHECK    = { color: '#2e7d32', weight: 1.5, opacity: 1, fillColor: '#4caf50', fillOpacity: 0.55 };
+const STYLE_X        = { color: '#b71c1c', weight: 1.5, opacity: 1, fillColor: '#e53935', fillOpacity: 0.55 };
+
+// Zoom level below which the heavy parcel layer is hidden (keeps pan/zoom smooth
+// at county scale; parcels appear once you zoom into a neighborhood).
+const MIN_PARCEL_ZOOM = 14;
+
+const map = L.map('map', {
+  zoomControl: true,
+  preferCanvas: true,        // canvas rendering = far faster with many polygons
+  zoomSnap: 0.25,            // finer, smoother zoom steps
+  zoomDelta: 0.5,
+  wheelPxPerZoomLevel: 90,
+  wheelDebounceTime: 20,
+  zoomAnimation: true,
+  fadeAnimation: true,
+  tapTolerance: 18,          // more forgiving finger taps
+  bounceAtZoomLimits: false,
+  inertia: true,
+  inertiaDeceleration: 2600, // snappier flick-to-stop
+}).setView(CENTER, DEFAULT_ZOOM);
+
+// Shared canvas renderer for all parcels.
+const parcelRenderer = L.canvas({ padding: 0.5 });
+
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  { attribution: 'Tiles &copy; Esri', maxZoom: 20, updateWhenZooming: false, keepBuffer: 4 }).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  { attribution: '', maxZoom: 20, opacity: 0.9, updateWhenZooming: false, keepBuffer: 4 }).addTo(map);
+
+let geojsonLayer = null, selectedLayer = null, totalCount = 0;
+const badgeByPid = {};   // pid -> L.marker
+
+// ---- Persistent per-parcel tagging (status: 'check'|'x'|null, notes: string) ----
+const STORAGE_KEY = 'ponderosa_parcel_state_v1';
+function loadState() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; } }
+function saveState(s) { localStorage.setItem(STORAGE_KEY, JSON.stringify(s)); }
+let STATE = loadState();
+function getPid(props) { return props.parcel_id || props.geocode || props.assessor_number || props.objectid || ''; }
+function getStatus(pid) { return STATE[pid]?.status || null; }
+function getNotes(pid) { return STATE[pid]?.notes || ''; }
+function setStatus(pid, v) { if (!pid) return; STATE[pid] = STATE[pid] || {}; STATE[pid].status = v; saveState(STATE); }
+function setNotes(pid, v) { if (!pid) return; STATE[pid] = STATE[pid] || {}; STATE[pid].notes = v; saveState(STATE); }
+
+function makeBadge(status) {
+  return L.divIcon({
+    className: 'parcel-badge',
+    html: `<div class="parcel-badge-inner ${status==='check'?'badge-check':'badge-x'}">${status==='check'?'✓':'✗'}</div>`,
+    iconSize: [26,26], iconAnchor: [13,13],
+  });
+}
+function updateBadge(layer, pid) {
+  const status = getStatus(pid);
+  if (badgeByPid[pid]) { map.removeLayer(badgeByPid[pid]); delete badgeByPid[pid]; }
+  if (status === 'check' || status === 'x') {
+    let c; try { c = layer.getBounds().getCenter(); } catch { return; }
+    badgeByPid[pid] = L.marker(c, { icon: makeBadge(status), interactive: false, keyboard: false, zIndexOffset: 1000 }).addTo(map);
+  }
+}
+
+function showStatus(msg, ms) { const el = document.getElementById('status'); el.textContent = msg; el.style.display = 'block'; if (ms) setTimeout(() => el.style.display = 'none', ms); }
+
+function styleForLayer(layer) {
+  if (layer === selectedLayer) return STYLE_SELECTED;
+  if (layer._dimmed) return STYLE_DIM;
+  const s = getStatus(getPid(layer.feature?.properties || {}));
+  if (s === 'check') return STYLE_CHECK;
+  if (s === 'x') return STYLE_X;
+  return STYLE_DEFAULT;
+}
+function restyle(layer) { layer.setStyle(styleForLayer(layer)); }
+
+const PRIORITY = [
+  ['owner_name','Owner'], ['mailing_address','Mail Addr'], ['situs_full','Situs Addr'],
+  ['parcel_id','Parcel ID'], ['geocode','Geocode'], ['legal_acreage','Acreage'], ['owner_type','Owner Type'],
+];
+const SKIP = new Set(['phone','phone_type','phone_source','objectid','shape_area','shape_length','geometry','cama_url','tax_url','all_situs_addresses','bbook','dor_id','last_cos','legal_start_date','legal_unit_footage','parcel_notes','situs_number','situs_addr','situs_city_state_zip']);
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function row(l, v) { return `<div class="popup-row"><span class="popup-label">${esc(l)}</span><span class="popup-value">${esc(v)}</span></div>`; }
+
+function buildPopup(props) {
+  const pid = getPid(props);
+  const rendered = new Set();
+  let html = '';
+  for (const [k, l] of PRIORITY) { if (props[k] != null && props[k] !== '') { html += row(l, props[k]); rendered.add(k); } }
+  for (const [k, v] of Object.entries(props)) {
+    if (!rendered.has(k) && !SKIP.has(k) && v != null && v !== '') {
+      html += row(k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), v);
+    }
+  }
+  const title = props.owner_name || props.parcel_id || 'Parcel';
+  let phoneHtml = '';
+  if (props.phone) {
+    const t = props.phone_type ? ` (${props.phone_type})` : '';
+    const tel = String(props.phone).replace(/[^0-9+]/g,'');
+    phoneHtml = `<div class="popup-phone"><div class="popup-row"><span class="popup-label">Phone</span><span class="popup-value"><a href="tel:${esc(tel)}">${esc(props.phone)}</a>${esc(t)}</span></div></div>`;
+  }
+  const status = getStatus(pid);
+  const notes = getNotes(pid);
+  const actions = `<div class="popup-actions">
+    <button class="btn-check ${status==='check'?'active':''}" data-action="check" data-pid="${esc(pid)}">✓</button>
+    <button class="btn-x ${status==='x'?'active':''}" data-action="x" data-pid="${esc(pid)}">✗</button>
+  </div>
+  <textarea class="popup-notes" data-pid="${esc(pid)}" placeholder="Notes (call log, follow-up, etc.)">${esc(notes)}</textarea>
+  <div class="popup-notes-saved" data-saved-pid="${esc(pid)}"></div>`;
+  return `<div class="popup-title">${esc(title)}</div>${html}${phoneHtml}${actions}`;
+}
+
+function openParcel(layer, latlng) {
+  if (selectedLayer && selectedLayer !== layer) restyle(selectedLayer);
+  selectedLayer = layer;
+  layer.setStyle(STYLE_SELECTED);
+  layer.bringToFront();
+  L.popup({ maxWidth: 360, autoPan: true })
+    .setLatLng(latlng || layer.getBounds().getCenter())
+    .setContent(buildPopup(layer.feature.properties))
+    .openOn(map);
+}
+
+function onEachFeature(feature, layer) {
+  layer.on({
+    mouseover() { if (layer !== selectedLayer) layer.setStyle(STYLE_HOVER); layer.bringToFront(); },
+    mouseout() { if (layer !== selectedLayer) restyle(layer); },
+    click(e) { openParcel(layer, e.latlng); },
+  });
+}
+map.on('popupopen', e => {
+  const root = e.popup._contentNode;
+  if (!root) return;
+  root.querySelectorAll('button[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const pid = btn.dataset.pid, action = btn.dataset.action;
+      const next = getStatus(pid) === action ? null : action;  // toggle off
+      setStatus(pid, next);
+      root.querySelectorAll('button[data-action]').forEach(b => b.classList.toggle('active', b.dataset.action === next));
+      if (selectedLayer) { restyle(selectedLayer); updateBadge(selectedLayer, pid); }
+    });
+  });
+  const ta = root.querySelector('textarea.popup-notes');
+  if (ta) {
+    let t = null;
+    ta.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(() => {
+        setNotes(ta.dataset.pid, ta.value);
+        const saved = root.querySelector(`[data-saved-pid="${ta.dataset.pid}"]`);
+        if (saved) { saved.textContent = 'saved'; setTimeout(() => saved.textContent = '', 1500); }
+      }, 400);
+    });
+  }
+});
+map.on('popupclose', () => { if (selectedLayer) { restyle(selectedLayer); selectedLayer = null; } });
+
+async function fetchFirst(urls) {
+  for (const u of urls) { try { const r = await fetch(u); if (r.ok) return await r.json(); } catch {} }
+  return null;
+}
+
+// ---- Viewport rendering: only draw the parcels currently on screen, so pan/
+// zoom never has to touch all ~92k polygons. This is what keeps mobile smooth.
+let ALL_FEATURES = [];
+const featBBox = [];      // parallel array: [minLng, minLat, maxLng, maxLat]
+let currentQuery = '';
+
+function computeBBox(geom) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const scan = (c) => {
+    if (typeof c[0] === 'number') {
+      if (c[0] < minX) minX = c[0]; if (c[0] > maxX) maxX = c[0];
+      if (c[1] < minY) minY = c[1]; if (c[1] > maxY) maxY = c[1];
+    } else { for (const x of c) scan(x); }
+  };
+  if (geom && geom.coordinates) scan(geom.coordinates);
+  return [minX, minY, maxX, maxY];
+}
+
+let refreshTimer = null;
+function scheduleRefresh() { clearTimeout(refreshTimer); refreshTimer = setTimeout(refreshViewport, 70); }
+
+function refreshViewport() {
+  if (!geojsonLayer) return;
+  const el = document.getElementById('status');
+  if (map.getZoom() < MIN_PARCEL_ZOOM) {
+    geojsonLayer.clearLayers();
+    el.textContent = 'Zoom in to see parcels'; el.style.display = 'block';
+    return;
+  }
+  if (el.textContent === 'Zoom in to see parcels') el.style.display = 'none';
+  const b = map.getBounds().pad(0.25);
+  const w = b.getWest(), s = b.getSouth(), e = b.getEast(), n = b.getNorth();
+  const subset = [];
+  for (let i = 0; i < ALL_FEATURES.length; i++) {
+    const bb = featBBox[i];
+    if (bb[0] <= e && bb[2] >= w && bb[1] <= n && bb[3] >= s) {
+      subset.push(ALL_FEATURES[i]);
+      if (subset.length >= 8000) break;   // safety cap for very wide views
+    }
+  }
+  geojsonLayer.clearLayers();
+  geojsonLayer.addData({ type: 'FeatureCollection', features: subset });
+  geojsonLayer.eachLayer(l => {
+    if (currentQuery) l._dimmed = !matchQ(l.feature?.properties || {}, currentQuery);
+    restyle(l);
+    const pid = getPid(l.feature?.properties || {});
+    if (getStatus(pid)) updateBadge(l, pid);
+  });
+}
+map.on('moveend', scheduleRefresh);
+map.on('resize', scheduleRefresh);
+
+async function init() {
+  showStatus('Loading parcels...');
+  const data = await fetchFirst(SOURCES);
+  if (!data) { showStatus('Could not load parcels.'); return; }
+  ALL_FEATURES = data.features || [];
+  totalCount = ALL_FEATURES.length;
+  for (let i = 0; i < ALL_FEATURES.length; i++) featBBox[i] = computeBBox(ALL_FEATURES[i].geometry);
+  geojsonLayer = L.geoJSON(null, { renderer: parcelRenderer, style: () => STYLE_DEFAULT, onEachFeature }).addTo(map);
+  document.getElementById('result-count').textContent = `${totalCount.toLocaleString()} parcels`;
+  refreshViewport();
+  showStatus(`Loaded ${totalCount.toLocaleString()} parcels`, 2500);
+}
+init();
+
+// ---- search ----
+const SEARCH_KEYS = ['owner_name','mailing_address','situs_full','situs_addr','parcel_id','geocode'];
+function matchQ(props, q) {
+  const l = q.toLowerCase();
+  for (const k of SEARCH_KEYS) if (props[k] && String(props[k]).toLowerCase().includes(l)) return true;
+  return false;
+}
+let stimer = null;
+document.getElementById('search-box').addEventListener('input', function () {
+  clearTimeout(stimer); stimer = setTimeout(() => runSearch(this.value.trim()), 200);
+});
+function runSearch(q) {
+  currentQuery = q;
+  const el = document.getElementById('result-count');
+  if (!q) { el.textContent = `${totalCount.toLocaleString()} parcels`; refreshViewport(); return; }
+  // Scan ALL features (not just on-screen) so search covers the whole county.
+  let hits = 0, firstIdx = -1;
+  for (let i = 0; i < ALL_FEATURES.length; i++) {
+    if (matchQ(ALL_FEATURES[i].properties, q)) { hits++; if (firstIdx < 0) firstIdx = i; }
+  }
+  el.textContent = `${hits} / ${totalCount} matched`;
+  if (firstIdx >= 0) {
+    const bb = featBBox[firstIdx];
+    try { map.fitBounds([[bb[1], bb[0]], [bb[3], bb[2]]], { maxZoom: 18, padding: [60, 60] }); } catch {}
+  }
+  refreshViewport();
+}
+
+// ---- Stats: count tagged parcels ----
+document.getElementById('stats-btn').addEventListener('click', () => {
+  let c = 0, x = 0, n = 0;
+  for (const v of Object.values(STATE)) { if (v.status === 'check') c++; if (v.status === 'x') x++; if (v.notes) n++; }
+  alert(`Tagged:\n✓ ${c}\n✗ ${x}\nNotes: ${n}\nTotal parcels: ${totalCount.toLocaleString()}`);
+});
+
+// ---- "Find me" geolocation + auto-select the parcel you're standing on ----
+let meMarker = null, meCircle = null;
+function pointInRing(pt, ring) {
+  // ray casting; pt = [lng,lat], ring = [[lng,lat],...]
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+    const intersect = ((yi > pt[1]) !== (yj > pt[1])) &&
+      (pt[0] < (xj - xi) * (pt[1] - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+function pointInGeometry(pt, geom) {
+  if (!geom) return false;
+  if (geom.type === 'Polygon') {
+    if (!pointInRing(pt, geom.coordinates[0])) return false;
+    for (let i = 1; i < geom.coordinates.length; i++) if (pointInRing(pt, geom.coordinates[i])) return false;
+    return true;
+  }
+  if (geom.type === 'MultiPolygon') {
+    for (const poly of geom.coordinates) {
+      if (pointInRing(pt, poly[0])) {
+        let hole = false;
+        for (let i = 1; i < poly.length; i++) if (pointInRing(pt, poly[i])) { hole = true; break; }
+        if (!hole) return true;
+      }
+    }
+  }
+  return false;
+}
+function openFeaturePopup(feature, latlng) {
+  L.popup({ maxWidth: 360, autoPan: true })
+    .setLatLng(latlng)
+    .setContent(buildPopup(feature.properties))
+    .openOn(map);
+}
+function selectParcelAt(lat, lng) {
+  const pt = [lng, lat];
+  for (let i = 0; i < ALL_FEATURES.length; i++) {
+    const bb = featBBox[i];
+    if (lng >= bb[0] && lng <= bb[2] && lat >= bb[1] && lat <= bb[3] &&
+        pointInGeometry(pt, ALL_FEATURES[i].geometry)) {
+      openFeaturePopup(ALL_FEATURES[i], [lat, lng]);
+      return true;
+    }
+  }
+  return false;
+}
+document.getElementById('locate-btn').addEventListener('click', () => {
+  if (!navigator.geolocation) { showStatus('Geolocation not supported', 2500); return; }
+  showStatus('Finding your location...');
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+    if (meMarker) map.removeLayer(meMarker);
+    if (meCircle) map.removeLayer(meCircle);
+    meMarker = L.marker([lat, lng], { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [18,18], iconAnchor: [9,9] }) }).addTo(map);
+    meCircle = L.circle([lat, lng], { radius: accuracy, color: '#2196f3', weight: 1, fillOpacity: 0.08 }).addTo(map);
+    map.setView([lat, lng], 18);
+    const hit = selectParcelAt(lat, lng);
+    showStatus(hit ? 'You are on this parcel' : 'Located — tap a parcel to see details', 3000);
+  }, err => {
+    showStatus('Location error: ' + err.message, 4000);
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
+});
+
+// ---- PWA ----
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/static/sw.js').catch(() => {});
+}
+</script>
+</body>
+</html>
