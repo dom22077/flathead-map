@@ -29,10 +29,13 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; d
 .popup-row { display: flex; gap: 6px; margin-bottom: 3px; }
 .popup-label { font-weight: 600; color: #555; min-width: 90px; flex-shrink: 0; }
 .popup-value { color: #222; word-break: break-word; }
-.popup-phone { margin-top: 8px; padding: 6px 10px; background: #e8f5e9; border-left: 3px solid #2e7d32; border-radius: 4px; }
-.popup-phone .popup-label { color: #2e7d32; }
-.popup-phone .popup-value { color: #1b5e20; font-weight: 700; font-size: 15px; }
-.popup-phone a { color: #1b5e20; text-decoration: none; }
+.popup-phone { margin-top: 8px; padding: 8px 10px; background: #e8f5e9; border-left: 3px solid #2e7d32; border-radius: 6px; }
+.popup-phone .phone-num { font-weight: 700; font-size: 15px; color: #1b5e20; margin-bottom: 8px; }
+.popup-phone .phone-type { font-size: 11px; color: #555; margin-left: 4px; }
+.phone-btns { display: flex; gap: 8px; }
+.phone-btns a { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; padding: 10px 6px; border-radius: 8px; font-size: 14px; font-weight: 700; text-decoration: none; text-align: center; }
+.btn-call { background: #2e7d32; color: #fff; }
+.btn-text { background: #1565c0; color: #fff; }
 .me-dot { width: 18px; height: 18px; background: #2196f3; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 0 0 3px rgba(33,150,243,0.4); }
 .popup-actions { display: flex; gap: 8px; margin-top: 10px; }
 .popup-actions button { flex: 1; padding: 8px; border: 1px solid #ccc; border-radius: 6px; background: #fff; cursor: pointer; font-size: 16px; font-weight: 700; transition: all 0.15s; }
@@ -63,16 +66,26 @@ const SOURCES = ['/data/parcels.geojson'];
 const CENTER = [48.1958, -114.3120]; // Kalispell
 const DEFAULT_ZOOM = 14;
 
-const STYLE_DEFAULT  = { color: '#e2b96f', weight: 1, opacity: 0.85, fillColor: '#e2b96f', fillOpacity: 0.15 };
-const STYLE_HOVER    = { color: '#fff',    weight: 2, opacity: 1,   fillColor: '#fff',    fillOpacity: 0.30 };
-const STYLE_SELECTED = { color: '#f44336', weight: 2.5, opacity: 1, fillColor: '#f44336', fillOpacity: 0.40 };
-const STYLE_DIM      = { color: '#555',    weight: 0.5, opacity: 0.4, fillColor: '#555', fillOpacity: 0.06 };
-const STYLE_CHECK    = { color: '#2e7d32', weight: 1.5, opacity: 1, fillColor: '#4caf50', fillOpacity: 0.55 };
-const STYLE_X        = { color: '#b71c1c', weight: 1.5, opacity: 1, fillColor: '#e53935', fillOpacity: 0.55 };
+const STYLE_DEFAULT  = { color: '#ffffff', weight: 0.8, opacity: 0.7, fillColor: '#ffffff', fillOpacity: 0.06 };
+const STYLE_HOVER    = { color: '#ffffff', weight: 1.5, opacity: 1,   fillColor: '#ffffff', fillOpacity: 0.22 };
+const STYLE_SELECTED = { color: '#f44336', weight: 2,   opacity: 1,   fillColor: '#f44336', fillOpacity: 0.38 };
+const STYLE_DIM      = { color: '#ffffff', weight: 0.4, opacity: 0.25, fillColor: '#fff',   fillOpacity: 0.02 };
+const STYLE_CHECK    = { color: '#4caf50', weight: 1.2, opacity: 1,   fillColor: '#4caf50', fillOpacity: 0.50 };
+const STYLE_X        = { color: '#e53935', weight: 1.2, opacity: 1,   fillColor: '#e53935', fillOpacity: 0.50 };
 
-// Zoom level below which the heavy parcel layer is hidden (keeps pan/zoom smooth
-// at county scale; parcels appear once you zoom into a neighborhood).
-const MIN_PARCEL_ZOOM = 14;
+function dynamicWeight() {
+  const z = map.getZoom();
+  if (z >= 16) return 1.0;
+  if (z >= 14) return 0.7;
+  if (z >= 12) return 0.5;
+  return 0.3;
+}
+function applyDynamicWeight(style) {
+  return Object.assign({}, style, { weight: dynamicWeight() });
+}
+
+// Parcels always visible — just fewer rendered at very wide zoom (viewport culling handles perf).
+const MIN_PARCEL_ZOOM = 9;
 
 const map = L.map('map', {
   zoomControl: true,
@@ -93,9 +106,9 @@ const map = L.map('map', {
 const parcelRenderer = L.canvas({ padding: 0.5 });
 
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  { attribution: 'Tiles &copy; Esri', maxZoom: 20, updateWhenZooming: false, keepBuffer: 4 }).addTo(map);
+  { attribution: 'Tiles &copy; Esri', maxZoom: 20, maxNativeZoom: 19, detectRetina: true, updateWhenZooming: false, keepBuffer: 6 }).addTo(map);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
-  { attribution: '', maxZoom: 20, opacity: 0.9, updateWhenZooming: false, keepBuffer: 4 }).addTo(map);
+  { attribution: '', maxZoom: 20, maxNativeZoom: 19, detectRetina: true, opacity: 0.85, updateWhenZooming: false, keepBuffer: 6 }).addTo(map);
 
 let geojsonLayer = null, selectedLayer = null, totalCount = 0;
 const badgeByPid = {};   // pid -> L.marker
@@ -130,12 +143,12 @@ function updateBadge(layer, pid) {
 function showStatus(msg, ms) { const el = document.getElementById('status'); el.textContent = msg; el.style.display = 'block'; if (ms) setTimeout(() => el.style.display = 'none', ms); }
 
 function styleForLayer(layer) {
-  if (layer === selectedLayer) return STYLE_SELECTED;
-  if (layer._dimmed) return STYLE_DIM;
+  if (layer === selectedLayer) return applyDynamicWeight(STYLE_SELECTED);
+  if (layer._dimmed) return applyDynamicWeight(STYLE_DIM);
   const s = getStatus(getPid(layer.feature?.properties || {}));
-  if (s === 'check') return STYLE_CHECK;
-  if (s === 'x') return STYLE_X;
-  return STYLE_DEFAULT;
+  if (s === 'check') return applyDynamicWeight(STYLE_CHECK);
+  if (s === 'x') return applyDynamicWeight(STYLE_X);
+  return applyDynamicWeight(STYLE_DEFAULT);
 }
 function restyle(layer) { layer.setStyle(styleForLayer(layer)); }
 
@@ -160,10 +173,24 @@ function buildPopup(props) {
   }
   const title = props.owner_name || props.parcel_id || 'Parcel';
   let phoneHtml = '';
-  if (props.phone) {
-    const t = props.phone_type ? ` (${props.phone_type})` : '';
-    const tel = String(props.phone).replace(/[^0-9+]/g,'');
-    phoneHtml = `<div class="popup-phone"><div class="popup-row"><span class="popup-label">Phone</span><span class="popup-value"><a href="tel:${esc(tel)}">${esc(props.phone)}</a>${esc(t)}</span></div></div>`;
+  const phoneSlots = [
+    [props.phone,  props.phone_type],
+    [props.phone2, props.phone2_type],
+    [props.phone3, props.phone3_type],
+    [props.phone4, props.phone4_type],
+    [props.phone5, props.phone5_type],
+  ];
+  for (const [num, typ] of phoneSlots) {
+    if (!num) continue;
+    const t   = typ ? `<span class="phone-type">${esc(typ)}</span>` : '';
+    const tel = String(num).replace(/[^0-9+]/g,'');
+    phoneHtml += `<div class="popup-phone">
+      <div class="phone-num">${esc(num)}${t}</div>
+      <div class="phone-btns">
+        <a class="btn-call" href="tel:${esc(tel)}">📞 Call</a>
+        <a class="btn-text" href="sms:${esc(tel)}">💬 Text</a>
+      </div>
+    </div>`;
   }
   const status = getStatus(pid);
   const notes = getNotes(pid);
@@ -252,10 +279,9 @@ function refreshViewport() {
   const el = document.getElementById('status');
   if (map.getZoom() < MIN_PARCEL_ZOOM) {
     geojsonLayer.clearLayers();
-    el.textContent = 'Zoom in to see parcels'; el.style.display = 'block';
     return;
   }
-  if (el.textContent === 'Zoom in to see parcels') el.style.display = 'none';
+  el.style.display = 'none';
   const b = map.getBounds().pad(0.25);
   const w = b.getWest(), s = b.getSouth(), e = b.getEast(), n = b.getNorth();
   const subset = [];
@@ -277,6 +303,9 @@ function refreshViewport() {
 }
 map.on('moveend', scheduleRefresh);
 map.on('resize', scheduleRefresh);
+map.on('zoomend', () => {
+  if (geojsonLayer) geojsonLayer.eachLayer(restyle);
+});
 
 async function init() {
   showStatus('Loading parcels...');
