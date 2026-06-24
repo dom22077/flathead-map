@@ -156,7 +156,7 @@ const PRIORITY = [
   ['owner_name','Owner'], ['mailing_address','Mail Addr'], ['situs_full','Situs Addr'],
   ['parcel_id','Parcel ID'], ['geocode','Geocode'], ['legal_acreage','Acreage'], ['owner_type','Owner Type'],
 ];
-const SKIP = new Set(['phone','phone_type','phone_source','objectid','shape_area','shape_length','geometry','cama_url','tax_url','all_situs_addresses','bbook','dor_id','last_cos','legal_start_date','legal_unit_footage','parcel_notes','situs_number','situs_addr','situs_city_state_zip']);
+const SKIP = new Set(['phone','phone_type','phone_source','objectid','shape_area','shape_length','geometry','cama_url','tax_url','all_situs_addresses','bbook','dor_id','last_cos','legal_start_date','legal_unit_footage','parcel_notes','situs_number','situs_addr','situs_city_state_zip','market_value']);
 
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function row(l, v) { return `<div class="popup-row"><span class="popup-label">${esc(l)}</span><span class="popup-value">${esc(v)}</span></div>`; }
@@ -170,6 +170,9 @@ function buildPopup(props) {
     if (!rendered.has(k) && !SKIP.has(k) && v != null && v !== '') {
       html += row(k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()), v);
     }
+  }
+  if (props.market_value) {
+    html += `<div class="popup-row"><span class="popup-label">Value</span><span class="popup-value" style="font-weight:700;color:#2e7d32">${esc(props.market_value)}</span></div>`;
   }
   const title = props.owner_name || props.parcel_id || 'Parcel';
   let phoneHtml = '';
